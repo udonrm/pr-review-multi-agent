@@ -29,6 +29,7 @@ export class DiffParser {
       /\.min\.(js|css)$/,
       /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i,
       /^(dist|build|node_modules)\//,
+      /\.(md|txt|json)$/i,
     ];
 
     const fileDiffs: FileDiff[] = files
