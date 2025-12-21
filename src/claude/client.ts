@@ -21,7 +21,13 @@ export class ClaudeClient {
     const text = response.content.find((b) => b.type === "text");
     if (!text || text.type !== "text") throw new Error("No response");
 
-    const jsonStr = text.text.replace(/```json?\s*([\s\S]*?)\s*```/g, "$1");
-    return JSON.parse(jsonStr.trim()) as T;
+    let jsonStr = text.text
+      .replace(/```json?\s*([\s\S]*?)\s*```/g, "$1")
+      .trim();
+
+    // 不正なエスケープ文字を修正
+    jsonStr = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
+
+    return JSON.parse(jsonStr) as T;
   }
 }
