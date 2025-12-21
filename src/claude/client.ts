@@ -25,9 +25,14 @@ export class ClaudeClient {
       .replace(/```json?\s*([\s\S]*?)\s*```/g, "$1")
       .trim();
 
-    // 不正なエスケープ文字を修正
-    jsonStr = jsonStr.replace(/\\(?!["\\/bfnrtu])/g, "\\\\");
-
-    return JSON.parse(jsonStr) as T;
+    try {
+      return JSON.parse(jsonStr) as T;
+    } catch {
+      // 不正なエスケープ文字を修正してリトライ
+      const fixed = jsonStr.replace(/"(?:[^"\\]|\\.)*"/g, (match) =>
+        match.replace(/\\(?!["\\/bfnrtu])/g, "\\\\")
+      );
+      return JSON.parse(fixed) as T;
+    }
   }
 }
