@@ -28,13 +28,14 @@ export class CommentPoster {
     result: FinalReviewResult
   ): Promise<void> {
     // まずサマリーのみでレビューを作成
+    // GitHub Actions は APPROVE を許可しないため COMMENT を使用
     await this.octokit.pulls.createReview({
       owner: context.owner,
       repo: context.repo,
       pull_number: context.pullNumber,
       commit_id: context.headSha,
       body: this.formatSummary(result),
-      event: result.finalVote,
+      event: "COMMENT",
     });
 
     // 各スレッドをReply形式で投稿
