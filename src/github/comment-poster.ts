@@ -4,6 +4,7 @@ import type {
   FinalReviewResult,
   ThreadedComment,
   AgentType,
+  AgentComment,
   CommentLabel,
 } from "../types";
 
@@ -26,6 +27,7 @@ export class CommentPoster {
     context: PRContext,
     result: FinalReviewResult
   ): Promise<void> {
+    // まずサマリーのみでレビューを作成
     await this.octokit.pulls.createReview({
       owner: context.owner,
       repo: context.repo,
@@ -33,63 +35,95 @@ export class CommentPoster {
       commit_id: context.headSha,
       body: this.formatSummary(result),
       event: result.finalVote,
-      comments: result.consolidatedComments.map((c) => ({
-        path: c.path,
-        line: c.line,
-        body: this.formatThreadedComment(c),
-      })),
     });
+
+    // 各スレッドをReply形式で投稿
+    for (const thread of result.consolidatedComments) {
+      await this.postThreadAsReplies(context, thread);
+    }
   }
 
-  private formatThreadedComment(thread: ThreadedComment): string {
-    if (thread.thread.length === 0) return "";
+  private async postThreadAsReplies(
+    context: PRContext,
+    thread: ThreadedComment
+  ): Promise<void> {
+    if (thread.thread.length === 0) return;
 
     const first = thread.thread[0];
-    const others = thread.thread.slice(1);
+
+    // 1人目のコメントを投稿
+    const { data: firstComment } = await this.octokit.pulls.createReviewComment(
+      {
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullNumber,
+        commit_id: context.headSha,
+        path: thread.path,
+        line: thread.line,
+        body: this.formatFirstComment(first),
+      }
+    );
+
+    // 2人目以降をReplyとして投稿
+    for (let i = 1; i < thread.thread.length; i++) {
+      const comment = thread.thread[i];
+      const stance = comment.vote === first.vote ? "👍 賛成" : "👎 反対";
+
+      await this.octokit.pulls.createReplyForReviewComment({
+        owner: context.owner,
+        repo: context.repo,
+        pull_number: context.pullNumber,
+        comment_id: firstComment.id,
+        body: this.formatReplyComment(comment, stance),
+      });
+    }
+
+    // 最後に結論をReplyとして投稿
+    const approveCount = thread.thread.filter(
+      (c) => c.vote === "APPROVE"
+    ).length;
+    const requestChangesCount = thread.thread.length - approveCount;
     const verdict =
       thread.finalVerdict === "APPROVE" ? "✅ 承認" : "🔴 修正必要";
 
-    // 1人目の発言（起点）
-    const firstDec = first.decorations.length
-      ? ` (${first.decorations.join(", ")})`
+    await this.octokit.pulls.createReplyForReviewComment({
+      owner: context.owner,
+      repo: context.repo,
+      pull_number: context.pullNumber,
+      comment_id: firstComment.id,
+      body: `**結論**: ${verdict}\n\n| 投票 | 票数 |\n|------|------|\n| APPROVE | ${approveCount} |\n| REQUEST_CHANGES | ${requestChangesCount} |`,
+    });
+  }
+
+  private formatFirstComment(comment: AgentComment): string {
+    const name = AGENT_NAMES[comment.agent];
+    const dec = comment.decorations.length
+      ? ` (${comment.decorations.join(", ")})`
       : "";
-    let body = `### ${AGENT_NAMES[first.agent]}の指摘\n\n`;
-    body += `**${first.label}**${firstDec}: ${first.subject}\n`;
-    if (first.discussion) {
-      body += `\n${first.discussion}\n`;
+
+    let body = `### ${name}\n\n`;
+    body += `**${comment.label}**${dec}: ${comment.subject}\n`;
+    if (comment.discussion) {
+      body += `\n${comment.discussion}\n`;
     }
+    body += `\n**判定**: ${comment.vote}`;
+    return body;
+  }
 
-    // 他の専門家の賛否
-    if (others.length > 0) {
-      body += `\n---\n\n### 他の専門家の意見\n\n`;
+  private formatReplyComment(comment: AgentComment, stance: string): string {
+    const name = AGENT_NAMES[comment.agent];
+    const dec = comment.decorations.length
+      ? ` (${comment.decorations.join(", ")})`
+      : "";
 
-      for (const comment of others) {
-        const name = AGENT_NAMES[comment.agent];
-        const agrees = comment.vote === first.vote;
-        const stance = agrees ? "👍 賛成" : "👎 反対";
-
-        body += `**${name}**: ${stance}\n\n`;
-
-        if (comment.subject !== first.subject || comment.discussion) {
-          const dec = comment.decorations.length
-            ? ` (${comment.decorations.join(", ")})`
-            : "";
-          body += `> ${comment.label}${dec}: ${comment.subject}\n`;
-          if (comment.discussion) {
-            body += `> ${comment.discussion.replace(/\n/g, "\n> ")}\n`;
-          }
-        }
-        body += "\n";
-      }
+    let body = `### ${name}: ${stance}\n\n`;
+    if (comment.subject) {
+      body += `**${comment.label}**${dec}: ${comment.subject}\n`;
     }
-
-    // 結論
-    const agreeCount = thread.thread.filter(
-      (c) => c.vote === first.vote
-    ).length;
-    const disagreeCount = thread.thread.length - agreeCount;
-    body += `---\n\n**結論**: ${verdict}（賛成 ${agreeCount} / 反対 ${disagreeCount}）`;
-
+    if (comment.discussion) {
+      body += `\n${comment.discussion}\n`;
+    }
+    body += `\n**判定**: ${comment.vote}`;
     return body;
   }
 
