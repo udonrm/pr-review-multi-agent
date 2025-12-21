@@ -93,18 +93,24 @@ ${COMMON_GUIDELINES}`,
 export const DISCUSSION_PROMPT = `
 ## Discussion Round
 
-Make your final decision after reviewing other experts' opinions.
+Review each expert's opinion and provide your response to ALL of them.
+You MUST comment on every expert's review - do not skip any.
 
 ### Other Experts' Opinions
 {otherReviews}
 
 ### Output Format
 {
-  "agreements": ["agreement 1", "agreement 2"],
-  "disagreements": ["disagreement with reason"],
+  "responses": [
+    { "expert": "Security Expert", "stance": "agree", "reason": "..." },
+    { "expert": "Performance Expert", "stance": "disagree", "reason": "..." },
+    ...
+  ],
   "finalVote": "APPROVE|REQUEST_CHANGES",
   "finalReasoning": "reason for final decision"
 }
+
+Note: You must include a response for each expert listed above.
 `;
 
 export const getAgentConfig = (type: AgentType): AgentConfig =>

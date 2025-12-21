@@ -44,10 +44,15 @@ export interface InitialReview {
   reasoning: string;
 }
 
+export interface ExpertResponse {
+  expert: string;
+  stance: "agree" | "disagree";
+  reason: string;
+}
+
 export interface DiscussionResult {
   agent: AgentType;
-  agreements: string[];
-  disagreements: string[];
+  responses: ExpertResponse[];
   finalVote: Vote;
   finalReasoning: string;
 }

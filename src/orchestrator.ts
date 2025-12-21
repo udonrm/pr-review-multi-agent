@@ -32,9 +32,14 @@ interface ReviewResponse {
   reasoning: string;
 }
 
+interface ExpertResponse {
+  expert: string;
+  stance: "agree" | "disagree";
+  reason: string;
+}
+
 interface DiscussionResponse {
-  agreements: string[];
-  disagreements: string[];
+  responses: ExpertResponse[];
   finalVote: Vote;
   finalReasoning: string;
 }
@@ -85,17 +90,22 @@ const REVIEW_SCHEMA = {
 const DISCUSSION_SCHEMA = {
   type: "object" as const,
   properties: {
-    agreements: { type: "array", items: { type: "string" } },
-    disagreements: { type: "array", items: { type: "string" } },
+    responses: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          expert: { type: "string" },
+          stance: { type: "string", enum: ["agree", "disagree"] },
+          reason: { type: "string" },
+        },
+        required: ["expert", "stance", "reason"],
+      },
+    },
     finalVote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
     finalReasoning: { type: "string" },
   },
-  required: [
-    "agreements",
-    "disagreements",
-    "finalVote",
-    "finalReasoning",
-  ] as string[],
+  required: ["responses", "finalVote", "finalReasoning"] as string[],
 };
 
 export class ReviewOrchestrator {
@@ -183,10 +193,7 @@ export class ReviewOrchestrator {
 
       discussions.push({
         agent: review.agent,
-        agreements: Array.isArray(res.agreements) ? res.agreements : [],
-        disagreements: Array.isArray(res.disagreements)
-          ? res.disagreements
-          : [],
+        responses: Array.isArray(res.responses) ? res.responses : [],
         finalVote: res.finalVote || "APPROVE",
         finalReasoning: res.finalReasoning || "",
       } as DiscussionResult);
@@ -200,7 +207,6 @@ export class ReviewOrchestrator {
       .map((r) => {
         const cfg = getAgentConfig(r.agent);
         const comments = r.comments
-          .slice(0, 5)
           .map((c) => {
             const dec = c.decorations.length
               ? ` (${c.decorations.join(", ")})`
