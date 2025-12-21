@@ -17,7 +17,7 @@ export class ClaudeClient {
   ): Promise<T> {
     const response = await this.client.messages.create({
       model: this.model,
-      max_tokens: 4096,
+      max_tokens: 2048,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
       tools: [

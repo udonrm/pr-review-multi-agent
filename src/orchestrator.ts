@@ -1,8 +1,11 @@
 import { ClaudeClient } from "./claude/client";
 import { DiffParser } from "./github/diff-parser";
 import { CommentPoster } from "./github/comment-poster";
-import { ReviewAgent } from "./agents/base-agent";
-import { getAllAgentTypes } from "./agents/prompts";
+import {
+  getAllAgentTypes,
+  getAgentConfig,
+  DISCUSSION_PROMPT,
+} from "./agents/prompts";
 import type {
   PRContext,
   InitialReview,
@@ -12,7 +15,88 @@ import type {
   AgentComment,
   Vote,
   CommentLabel,
+  CommentDecoration,
 } from "./types";
+
+interface ReviewResponse {
+  comments: Array<{
+    path: string;
+    line: number;
+    label: CommentLabel;
+    decorations: CommentDecoration[];
+    subject: string;
+    discussion?: string;
+  }>;
+  summary: string;
+  vote: Vote;
+  reasoning: string;
+}
+
+interface DiscussionResponse {
+  agreements: string[];
+  disagreements: string[];
+  finalVote: Vote;
+  finalReasoning: string;
+}
+
+const REVIEW_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    comments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          line: { type: "number" },
+          label: {
+            type: "string",
+            enum: [
+              "praise",
+              "nitpick",
+              "suggestion",
+              "issue",
+              "todo",
+              "question",
+              "thought",
+              "chore",
+            ],
+          },
+          decorations: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["blocking", "non-blocking", "if-minor"],
+            },
+          },
+          subject: { type: "string" },
+          discussion: { type: "string" },
+        },
+        required: ["path", "line", "label", "subject"],
+      },
+    },
+    summary: { type: "string" },
+    vote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
+    reasoning: { type: "string" },
+  },
+  required: ["comments", "summary", "vote", "reasoning"] as string[],
+};
+
+const DISCUSSION_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    agreements: { type: "array", items: { type: "string" } },
+    disagreements: { type: "array", items: { type: "string" } },
+    finalVote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
+    finalReasoning: { type: "string" },
+  },
+  required: [
+    "agreements",
+    "disagreements",
+    "finalVote",
+    "finalReasoning",
+  ] as string[],
+};
 
 export class ReviewOrchestrator {
   private claude: ClaudeClient;
@@ -51,13 +135,31 @@ export class ReviewOrchestrator {
     context: PRContext,
     diffContent: string
   ): Promise<InitialReview[]> {
+    const prompt = `## Pull Request: ${context.title}\n\n${
+      context.body || "(No description)"
+    }\n\n## Diff\n\n${diffContent}`;
+
     return Promise.all(
-      getAllAgentTypes().map((type) =>
-        new ReviewAgent(this.claude, type).performInitialReview(
-          context,
-          diffContent
-        )
-      )
+      getAllAgentTypes().map(async (type) => {
+        const config = getAgentConfig(type);
+        const res = await this.claude.chatJSON<ReviewResponse>(
+          config.systemPrompt,
+          prompt,
+          REVIEW_SCHEMA
+        );
+        const comments = Array.isArray(res.comments) ? res.comments : [];
+
+        return {
+          agent: type,
+          comments: comments.map((c) => ({
+            ...c,
+            decorations: Array.isArray(c.decorations) ? c.decorations : [],
+          })),
+          summary: res.summary || "",
+          initialVote: res.vote || "APPROVE",
+          reasoning: res.reasoning || "",
+        } as InitialReview;
+      })
     );
   }
 
@@ -65,13 +167,53 @@ export class ReviewOrchestrator {
     reviews: InitialReview[]
   ): Promise<DiscussionResult[]> {
     return Promise.all(
-      reviews.map((review) => {
+      reviews.map(async (review) => {
         const others = reviews.filter((r) => r.agent !== review.agent);
-        return new ReviewAgent(this.claude, review.agent).discussAndVote(
-          review,
-          others
+        const prompt = this.buildDiscussionPrompt(review, others);
+        const config = getAgentConfig(review.agent);
+        const res = await this.claude.chatJSON<DiscussionResponse>(
+          config.systemPrompt,
+          prompt,
+          DISCUSSION_SCHEMA
         );
+
+        return {
+          agent: review.agent,
+          agreements: Array.isArray(res.agreements) ? res.agreements : [],
+          disagreements: Array.isArray(res.disagreements)
+            ? res.disagreements
+            : [],
+          finalVote: res.finalVote || "APPROVE",
+          finalReasoning: res.finalReasoning || "",
+        } as DiscussionResult;
       })
+    );
+  }
+
+  private buildDiscussionPrompt(
+    yourReview: InitialReview,
+    otherReviews: InitialReview[]
+  ): string {
+    const othersText = otherReviews
+      .map((r) => {
+        const cfg = getAgentConfig(r.agent);
+        const comments = r.comments
+          .slice(0, 5)
+          .map((c) => {
+            const dec = c.decorations.length
+              ? ` (${c.decorations.join(", ")})`
+              : "";
+            return `- ${c.label}${dec}: ${c.subject} [${c.path}:${c.line}]`;
+          })
+          .join("\n");
+        return `### ${cfg.name}\nVote: ${r.initialVote}\nSummary: ${r.summary}\n${comments}`;
+      })
+      .join("\n\n");
+
+    const yourText = `Vote: ${yourReview.initialVote}\nSummary: ${yourReview.summary}`;
+    return DISCUSSION_PROMPT.replace("{otherReviews}", othersText).replace(
+      "{yourReview}",
+      yourText
     );
   }
 
@@ -85,7 +227,6 @@ export class ReviewOrchestrator {
       else voteCount.requestChanges++;
     }
 
-    // 多数決（5人中3人以上）
     const finalVote: Vote =
       voteCount.requestChanges >= 3 ? "REQUEST_CHANGES" : "APPROVE";
 
@@ -94,22 +235,17 @@ export class ReviewOrchestrator {
       discussions,
       finalVote,
       voteCount,
-      consolidatedComments: this.buildThreadedComments(reviews, discussions),
+      consolidatedComments: this.buildThreadedComments(reviews),
       summary: this.generateSummary(reviews, finalVote),
     };
   }
 
-  private buildThreadedComments(
-    reviews: InitialReview[],
-    discussions: DiscussionResult[]
-  ): ThreadedComment[] {
-    // ファイル+行でグループ化
+  private buildThreadedComments(reviews: InitialReview[]): ThreadedComment[] {
     const map = new Map<
       string,
       { path: string; line: number; agentComments: Map<string, AgentComment> }
     >();
 
-    // Round 1のコメントを追加（1エージェント1コメントにまとめる）
     for (const review of reviews) {
       for (const c of review.comments) {
         const key = `${c.path}:${c.line}`;
@@ -119,21 +255,19 @@ export class ReviewOrchestrator {
           agentComments: new Map(),
         };
 
-        const existingComment = entry.agentComments.get(review.agent);
-        if (existingComment) {
-          // 同じエージェントの複数コメントをまとめる
-          existingComment.subject += ` / ${c.label}: ${c.subject}`;
+        const existing = entry.agentComments.get(review.agent);
+        if (existing) {
+          existing.subject += ` / ${c.label}: ${c.subject}`;
           if (c.discussion) {
-            existingComment.discussion = existingComment.discussion
-              ? `${existingComment.discussion}\n\n${c.discussion}`
+            existing.discussion = existing.discussion
+              ? `${existing.discussion}\n\n${c.discussion}`
               : c.discussion;
           }
-          // blockingがあれば保持
           if (
             c.decorations.includes("blocking") &&
-            !existingComment.decorations.includes("blocking")
+            !existing.decorations.includes("blocking")
           ) {
-            existingComment.decorations.push("blocking");
+            existing.decorations.push("blocking");
           }
         } else {
           entry.agentComments.set(review.agent, {
@@ -149,7 +283,6 @@ export class ReviewOrchestrator {
       }
     }
 
-    // 各スレッドの結論を決定（blockingがあればREQUEST_CHANGES）
     return Array.from(map.values()).map((item) => {
       const comments = Array.from(item.agentComments.values());
       const hasBlocking = comments.some((c) =>
@@ -222,7 +355,7 @@ export class ReviewOrchestrator {
       discussions: [],
       finalVote: "APPROVE",
       voteCount: { approve: 5, requestChanges: 0 },
-      consolidatedComments: this.buildThreadedComments(reviews, []),
+      consolidatedComments: this.buildThreadedComments(reviews),
       summary: "全専門家が承認しました。",
     };
   }

@@ -61,12 +61,11 @@ export interface FinalReviewResult {
   summary: string;
 }
 
-// スレッド形式のコメント（各エージェントの発言を保持）
 export interface ThreadedComment {
   path: string;
   line: number;
-  thread: AgentComment[]; // 会話スレッド
-  finalVerdict: Vote; // このスレッドの結論
+  thread: AgentComment[];
+  finalVerdict: Vote;
 }
 
 export interface AgentComment {
@@ -92,6 +91,5 @@ export interface PRContext {
 export interface AgentConfig {
   type: AgentType;
   name: string;
-  personality: string;
   systemPrompt: string;
 }

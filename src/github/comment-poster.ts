@@ -1,24 +1,21 @@
 import { Octokit } from "@octokit/rest";
+import { getAgentConfig } from "../agents/prompts";
 import type {
   PRContext,
   FinalReviewResult,
   ThreadedComment,
-  AgentType,
   AgentComment,
+  AgentType,
   CommentLabel,
+  Vote,
 } from "../types";
 
-const AGENT_INFO: Record<AgentType, { emoji: string; name: string }> = {
-  "security-expert": { emoji: "🔒", name: "Security" },
-  "performance-expert": { emoji: "⚡", name: "Performance" },
-  "readability-expert": { emoji: "📖", name: "Readability" },
-  "architecture-expert": { emoji: "🏗️", name: "Architecture" },
-  "testing-expert": { emoji: "🧪", name: "Testing" },
-};
-
-const getAgentLabel = (agent: AgentType): string => {
-  const info = AGENT_INFO[agent];
-  return `${info.emoji} ${info.name}`;
+const AGENT_EMOJI: Record<AgentType, string> = {
+  "security-expert": "🔒",
+  "performance-expert": "⚡",
+  "readability-expert": "📖",
+  "architecture-expert": "🏗️",
+  "testing-expert": "🧪",
 };
 
 const LABEL_EMOJI: Record<CommentLabel, string> = {
@@ -32,8 +29,43 @@ const LABEL_EMOJI: Record<CommentLabel, string> = {
   chore: "🧹",
 };
 
-const getLabelWithEmoji = (label: CommentLabel): string => {
-  return `${LABEL_EMOJI[label]} ${label}`;
+const voteEmoji = (vote: Vote) => (vote === "APPROVE" ? "✅" : "❌");
+const getAgentLabel = (type: AgentType) =>
+  `${AGENT_EMOJI[type]} ${getAgentConfig(type).name}`;
+const getLabelWithEmoji = (label: CommentLabel) =>
+  `${LABEL_EMOJI[label]} ${label}`;
+
+const formatComment = (comment: AgentComment, prefix = ""): string => {
+  const label = getLabelWithEmoji(comment.label);
+  const dec = comment.decorations.length
+    ? ` (${comment.decorations.join(", ")})`
+    : "";
+
+  let body = `### ${getAgentLabel(comment.agent)}${prefix}\n\n`;
+  body += `**${label}**${dec}: ${comment.subject}\n`;
+  if (comment.discussion) body += `\n${comment.discussion}\n`;
+  body += `\n**Vote**: ${voteEmoji(comment.vote)} ${comment.vote}`;
+  return body;
+};
+
+const formatVoteTable = (
+  comments: { agent: AgentType; vote: Vote }[],
+  finalVerdict: Vote
+): string => {
+  const approveCount = comments.filter((c) => c.vote === "APPROVE").length;
+  const requestChangesCount = comments.length - approveCount;
+  const verdict =
+    finalVerdict === "APPROVE" ? "✅ Approved" : "🔴 Changes Requested";
+  const resultText =
+    finalVerdict === "APPROVE" ? "Approved" : "Changes requested";
+
+  let body = `## 📊 Vote Result: ${verdict}\n\n`;
+  body += `| Expert | Decision |\n|--------|------|\n`;
+  for (const c of comments) {
+    body += `| ${getAgentLabel(c.agent)} | ${voteEmoji(c.vote)} ${c.vote} |\n`;
+  }
+  body += `\n**Result: ${approveCount} ✅ / ${requestChangesCount} ❌ → ${resultText}**`;
+  return body;
 };
 
 export class CommentPoster {
@@ -47,8 +79,6 @@ export class CommentPoster {
     context: PRContext,
     result: FinalReviewResult
   ): Promise<void> {
-    // まずサマリーのみでレビューを作成
-    // GitHub Actions は APPROVE を許可しないため COMMENT を使用
     await this.octokit.pulls.createReview({
       owner: context.owner,
       repo: context.repo,
@@ -58,7 +88,6 @@ export class CommentPoster {
       event: "COMMENT",
     });
 
-    // 各スレッドをReply形式で投稿
     for (const thread of result.consolidatedComments) {
       await this.postThreadAsReplies(context, thread);
     }
@@ -71,8 +100,6 @@ export class CommentPoster {
     if (thread.thread.length === 0) return;
 
     const first = thread.thread[0];
-
-    // 1人目のコメントを投稿
     const { data: firstComment } = await this.octokit.pulls.createReviewComment(
       {
         owner: context.owner,
@@ -81,87 +108,29 @@ export class CommentPoster {
         commit_id: context.headSha,
         path: thread.path,
         line: thread.line,
-        body: this.formatFirstComment(first),
+        body: formatComment(first),
       }
     );
 
-    // 2人目以降をReplyとして投稿
     for (let i = 1; i < thread.thread.length; i++) {
       const comment = thread.thread[i];
-      const stance = comment.vote === first.vote ? "👍 賛成" : "👎 反対";
-
+      const stance = comment.vote === first.vote ? ": 👍 賛成" : ": 👎 反対";
       await this.octokit.pulls.createReplyForReviewComment({
         owner: context.owner,
         repo: context.repo,
         pull_number: context.pullNumber,
         comment_id: firstComment.id,
-        body: this.formatReplyComment(comment, stance),
+        body: formatComment(comment, stance),
       });
     }
-
-    // 最後に結論をReplyとして投稿
-    const approveCount = thread.thread.filter(
-      (c) => c.vote === "APPROVE"
-    ).length;
-    const requestChangesCount = thread.thread.length - approveCount;
-    const verdict =
-      thread.finalVerdict === "APPROVE"
-        ? "✅ Approved"
-        : "🔴 Changes Requested";
-    const resultText =
-      thread.finalVerdict === "APPROVE" ? "Approved" : "Changes requested";
-
-    let body = `## 📊 Vote Result: ${verdict}\n\n`;
-    body += `| Expert | Decision |\n|--------|------|\n`;
-    for (const c of thread.thread) {
-      const voteEmoji = c.vote === "APPROVE" ? "✅" : "❌";
-      body += `| ${getAgentLabel(c.agent)} | ${voteEmoji} ${c.vote} |\n`;
-    }
-    body += `\n**Result: ${approveCount} ✅ / ${requestChangesCount} ❌ → ${resultText}**`;
 
     await this.octokit.pulls.createReplyForReviewComment({
       owner: context.owner,
       repo: context.repo,
       pull_number: context.pullNumber,
       comment_id: firstComment.id,
-      body,
+      body: formatVoteTable(thread.thread, thread.finalVerdict),
     });
-  }
-
-  private formatFirstComment(comment: AgentComment): string {
-    const agentLabel = getAgentLabel(comment.agent);
-    const labelWithEmoji = getLabelWithEmoji(comment.label);
-    const dec = comment.decorations.length
-      ? ` (${comment.decorations.join(", ")})`
-      : "";
-    const voteEmoji = comment.vote === "APPROVE" ? "✅" : "❌";
-
-    let body = `### ${agentLabel}\n\n`;
-    body += `**${labelWithEmoji}**${dec}: ${comment.subject}\n`;
-    if (comment.discussion) {
-      body += `\n${comment.discussion}\n`;
-    }
-    body += `\n**Vote**: ${voteEmoji} ${comment.vote}`;
-    return body;
-  }
-
-  private formatReplyComment(comment: AgentComment, stance: string): string {
-    const agentLabel = getAgentLabel(comment.agent);
-    const labelWithEmoji = getLabelWithEmoji(comment.label);
-    const dec = comment.decorations.length
-      ? ` (${comment.decorations.join(", ")})`
-      : "";
-    const voteEmoji = comment.vote === "APPROVE" ? "✅" : "❌";
-
-    let body = `### ${agentLabel}: ${stance}\n\n`;
-    if (comment.subject) {
-      body += `**${labelWithEmoji}**${dec}: ${comment.subject}\n`;
-    }
-    if (comment.discussion) {
-      body += `\n${comment.discussion}\n`;
-    }
-    body += `\n**Vote**: ${voteEmoji} ${comment.vote}`;
-    return body;
   }
 
   private formatSummary(result: FinalReviewResult): string {
@@ -175,8 +144,9 @@ export class CommentPoster {
     s += `| Expert | Decision |\n|--------|------|\n`;
 
     for (const r of result.initialReviews) {
-      const voteEmoji = r.initialVote === "APPROVE" ? "✅" : "❌";
-      s += `| ${getAgentLabel(r.agent)} | ${voteEmoji} ${r.initialVote} |\n`;
+      s += `| ${getAgentLabel(r.agent)} | ${voteEmoji(r.initialVote)} ${
+        r.initialVote
+      } |\n`;
     }
 
     s += `\n**Result: ${approve} ✅ / ${requestChanges} ❌ → ${resultText}**\n\n`;
