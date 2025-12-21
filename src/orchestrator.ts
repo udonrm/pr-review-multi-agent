@@ -173,7 +173,7 @@ export class ReviewOrchestrator {
     // 直列実行でレートリミットを回避
     for (const review of reviews) {
       const others = reviews.filter((r) => r.agent !== review.agent);
-      const prompt = this.buildDiscussionPrompt(review, others);
+      const prompt = this.buildDiscussionPrompt(others);
       const config = getAgentConfig(review.agent);
       const res = await this.claude.chatJSON<DiscussionResponse>(
         config.systemPrompt,
@@ -195,10 +195,7 @@ export class ReviewOrchestrator {
     return discussions;
   }
 
-  private buildDiscussionPrompt(
-    yourReview: InitialReview,
-    otherReviews: InitialReview[]
-  ): string {
+  private buildDiscussionPrompt(otherReviews: InitialReview[]): string {
     const othersText = otherReviews
       .map((r) => {
         const cfg = getAgentConfig(r.agent);
@@ -215,11 +212,7 @@ export class ReviewOrchestrator {
       })
       .join("\n\n");
 
-    const yourText = `Vote: ${yourReview.initialVote}\nSummary: ${yourReview.summary}`;
-    return DISCUSSION_PROMPT.replace("{otherReviews}", othersText).replace(
-      "{yourReview}",
-      yourText
-    );
+    return DISCUSSION_PROMPT.replace("{otherReviews}", othersText);
   }
 
   private consolidateResults(
