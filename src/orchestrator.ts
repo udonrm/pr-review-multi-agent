@@ -106,43 +106,63 @@ export class ReviewOrchestrator {
     // ファイル+行でグループ化
     const map = new Map<
       string,
-      { path: string; line: number; comments: AgentComment[] }
+      { path: string; line: number; agentComments: Map<string, AgentComment> }
     >();
 
-    // Round 1のコメントを追加
+    // Round 1のコメントを追加（1エージェント1コメントにまとめる）
     for (const review of reviews) {
       for (const c of review.comments) {
         const key = `${c.path}:${c.line}`;
         const entry = map.get(key) || {
           path: c.path,
           line: c.line,
-          comments: [],
+          agentComments: new Map(),
         };
-        entry.comments.push({
-          agent: review.agent,
-          label: c.label,
-          decorations: c.decorations,
-          subject: c.subject,
-          discussion: c.discussion,
-          vote: review.initialVote,
-        });
+
+        const existingComment = entry.agentComments.get(review.agent);
+        if (existingComment) {
+          // 同じエージェントの複数コメントをまとめる
+          existingComment.subject += ` / ${c.label}: ${c.subject}`;
+          if (c.discussion) {
+            existingComment.discussion = existingComment.discussion
+              ? `${existingComment.discussion}\n\n${c.discussion}`
+              : c.discussion;
+          }
+          // blockingがあれば保持
+          if (
+            c.decorations.includes("blocking") &&
+            !existingComment.decorations.includes("blocking")
+          ) {
+            existingComment.decorations.push("blocking");
+          }
+        } else {
+          entry.agentComments.set(review.agent, {
+            agent: review.agent,
+            label: c.label,
+            decorations: [...c.decorations],
+            subject: c.subject,
+            discussion: c.discussion,
+            vote: review.initialVote,
+          });
+        }
         map.set(key, entry);
       }
     }
 
     // 各スレッドの結論を決定（blockingがあればREQUEST_CHANGES）
     return Array.from(map.values()).map((item) => {
-      const hasBlocking = item.comments.some((c) =>
+      const comments = Array.from(item.agentComments.values());
+      const hasBlocking = comments.some((c) =>
         c.decorations.includes("blocking")
       );
-      const requestChangesCount = item.comments.filter(
+      const requestChangesCount = comments.filter(
         (c) => c.vote === "REQUEST_CHANGES"
       ).length;
 
       return {
         path: item.path,
         line: item.line,
-        thread: item.comments,
+        thread: comments,
         finalVerdict:
           hasBlocking || requestChangesCount >= 2
             ? "REQUEST_CHANGES"
