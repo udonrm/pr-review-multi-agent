@@ -108,14 +108,16 @@ export class ReviewAgent {
       REVIEW_SCHEMA
     );
 
+    const comments = Array.isArray(res.comments) ? res.comments : [];
+
     return {
       agent: this.type,
-      comments: (res.comments || []).map((c) => ({
+      comments: comments.map((c) => ({
         ...c,
-        decorations: c.decorations || [],
+        decorations: Array.isArray(c.decorations) ? c.decorations : [],
       })),
       summary: res.summary || "",
-      initialVote: res.vote,
+      initialVote: res.vote || "APPROVE",
       reasoning: res.reasoning || "",
     };
   }
@@ -156,9 +158,9 @@ export class ReviewAgent {
 
     return {
       agent: this.type,
-      agreements: res.agreements || [],
-      disagreements: res.disagreements || [],
-      finalVote: res.finalVote,
+      agreements: Array.isArray(res.agreements) ? res.agreements : [],
+      disagreements: Array.isArray(res.disagreements) ? res.disagreements : [],
+      finalVote: res.finalVote || "APPROVE",
       finalReasoning: res.finalReasoning || "",
     };
   }
