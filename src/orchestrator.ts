@@ -139,55 +139,60 @@ export class ReviewOrchestrator {
       context.body || "(No description)"
     }\n\n## Diff\n\n${diffContent}`;
 
-    return Promise.all(
-      getAllAgentTypes().map(async (type) => {
-        const config = getAgentConfig(type);
-        const res = await this.claude.chatJSON<ReviewResponse>(
-          config.systemPrompt,
-          prompt,
-          REVIEW_SCHEMA
-        );
-        const comments = Array.isArray(res.comments) ? res.comments : [];
+    const reviews: InitialReview[] = [];
 
-        return {
-          agent: type,
-          comments: comments.map((c) => ({
-            ...c,
-            decorations: Array.isArray(c.decorations) ? c.decorations : [],
-          })),
-          summary: res.summary || "",
-          initialVote: res.vote || "APPROVE",
-          reasoning: res.reasoning || "",
-        } as InitialReview;
-      })
-    );
+    for (const type of getAllAgentTypes()) {
+      const config = getAgentConfig(type);
+      const res = await this.claude.chatJSON<ReviewResponse>(
+        config.systemPrompt,
+        prompt,
+        REVIEW_SCHEMA
+      );
+      const comments = Array.isArray(res.comments) ? res.comments : [];
+
+      reviews.push({
+        agent: type,
+        comments: comments.map((c) => ({
+          ...c,
+          decorations: Array.isArray(c.decorations) ? c.decorations : [],
+        })),
+        summary: res.summary || "",
+        initialVote: res.vote || "APPROVE",
+        reasoning: res.reasoning || "",
+      } as InitialReview);
+    }
+
+    return reviews;
   }
 
   private async runDiscussionRound(
     reviews: InitialReview[]
   ): Promise<DiscussionResult[]> {
-    return Promise.all(
-      reviews.map(async (review) => {
-        const others = reviews.filter((r) => r.agent !== review.agent);
-        const prompt = this.buildDiscussionPrompt(review, others);
-        const config = getAgentConfig(review.agent);
-        const res = await this.claude.chatJSON<DiscussionResponse>(
-          config.systemPrompt,
-          prompt,
-          DISCUSSION_SCHEMA
-        );
+    const discussions: DiscussionResult[] = [];
 
-        return {
-          agent: review.agent,
-          agreements: Array.isArray(res.agreements) ? res.agreements : [],
-          disagreements: Array.isArray(res.disagreements)
-            ? res.disagreements
-            : [],
-          finalVote: res.finalVote || "APPROVE",
-          finalReasoning: res.finalReasoning || "",
-        } as DiscussionResult;
-      })
-    );
+    // 直列実行でレートリミットを回避
+    for (const review of reviews) {
+      const others = reviews.filter((r) => r.agent !== review.agent);
+      const prompt = this.buildDiscussionPrompt(review, others);
+      const config = getAgentConfig(review.agent);
+      const res = await this.claude.chatJSON<DiscussionResponse>(
+        config.systemPrompt,
+        prompt,
+        DISCUSSION_SCHEMA
+      );
+
+      discussions.push({
+        agent: review.agent,
+        agreements: Array.isArray(res.agreements) ? res.agreements : [],
+        disagreements: Array.isArray(res.disagreements)
+          ? res.disagreements
+          : [],
+        finalVote: res.finalVote || "APPROVE",
+        finalReasoning: res.finalReasoning || "",
+      } as DiscussionResult);
+    }
+
+    return discussions;
   }
 
   private buildDiscussionPrompt(

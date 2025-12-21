@@ -24,11 +24,26 @@ export class DiffParser {
     ]);
 
     const ignorePatterns = [
+      // CI/CD, 設定ファイル
       /^\.github\//,
+      /^\.vscode\//,
+      /^\.idea\//,
+      // ロックファイル
       /package-lock\.json$|yarn\.lock$|pnpm-lock\.yaml$|bun\.lockb$/,
+      // ミニファイされたファイル
       /\.min\.(js|css)$/,
-      /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot)$/i,
-      /^(dist|build|node_modules)\//,
+      // バイナリ/アセット
+      /\.(png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|webm|mp3|pdf)$/i,
+      // ビルド成果物
+      /^(dist|build|out|\.next|node_modules)\//,
+      // 生成ファイル
+      /\.generated\.(ts|js|tsx|jsx)$/,
+      /\.d\.ts$/,
+      // スナップショット
+      /__snapshots__\//,
+      /\.snap$/,
+      // ソースマップ
+      /\.map$/,
     ];
 
     const fileDiffs: FileDiff[] = files
