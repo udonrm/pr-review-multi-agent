@@ -110,13 +110,13 @@ export class ReviewAgent {
 
     return {
       agent: this.type,
-      comments: res.comments.map((c) => ({
+      comments: (res.comments || []).map((c) => ({
         ...c,
         decorations: c.decorations || [],
       })),
-      summary: res.summary,
+      summary: res.summary || "",
       initialVote: res.vote,
-      reasoning: res.reasoning,
+      reasoning: res.reasoning || "",
     };
   }
 
@@ -156,10 +156,10 @@ export class ReviewAgent {
 
     return {
       agent: this.type,
-      agreements: res.agreements,
-      disagreements: res.disagreements,
+      agreements: res.agreements || [],
+      disagreements: res.disagreements || [],
       finalVote: res.finalVote,
-      finalReasoning: res.finalReasoning,
+      finalReasoning: res.finalReasoning || "",
     };
   }
 }
