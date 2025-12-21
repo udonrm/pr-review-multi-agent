@@ -79,15 +79,6 @@ export class CommentPoster {
     context: PRContext,
     result: FinalReviewResult
   ): Promise<void> {
-    await this.octokit.pulls.createReview({
-      owner: context.owner,
-      repo: context.repo,
-      pull_number: context.pullNumber,
-      commit_id: context.headSha,
-      body: this.formatSummary(result),
-      event: "COMMENT",
-    });
-
     for (const thread of result.consolidatedComments) {
       await this.postThreadAsReplies(context, thread);
     }
@@ -131,44 +122,5 @@ export class CommentPoster {
       comment_id: firstComment.id,
       body: formatVoteTable(thread.thread, thread.finalVerdict),
     });
-  }
-
-  private formatSummary(result: FinalReviewResult): string {
-    const { approve, requestChanges } = result.voteCount;
-    const verdict =
-      result.finalVote === "APPROVE" ? "✅ Approved" : "🔴 Changes Requested";
-    const resultText =
-      result.finalVote === "APPROVE" ? "Approved" : "Changes requested";
-
-    let s = `## 📊 Multi-Agent Review Result: ${verdict}\n\n`;
-    s += `| Expert | Decision |\n|--------|------|\n`;
-
-    for (const r of result.initialReviews) {
-      s += `| ${getAgentLabel(r.agent)} | ${voteEmoji(r.initialVote)} ${
-        r.initialVote
-      } |\n`;
-    }
-
-    s += `\n**Result: ${approve} ✅ / ${requestChanges} ❌ → ${resultText}**\n\n`;
-    s += `---\n\n### Expert Opinions\n\n`;
-
-    for (const r of result.initialReviews) {
-      const counts = this.countLabels(r.comments);
-      s += `#### ${getAgentLabel(r.agent)}\n${
-        r.summary
-      }\n- Comments: ${counts}\n\n`;
-    }
-
-    return s + `---\n${result.summary}`;
-  }
-
-  private countLabels(comments: Array<{ label: CommentLabel }>): string {
-    const counts: Partial<Record<CommentLabel, number>> = {};
-    for (const c of comments) counts[c.label] = (counts[c.label] || 0) + 1;
-    return (
-      Object.entries(counts)
-        .map(([k, v]) => `${LABEL_EMOJI[k as CommentLabel]} ${k}: ${v}`)
-        .join(", ") || "none"
-    );
   }
 }
