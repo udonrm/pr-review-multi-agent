@@ -1,0 +1,38 @@
+name: 'Multi-Agent PR Review'
+description: '5人のAI専門家がPRをレビューし、議論して多数決で判定します'
+author: 'Your Name'
+
+branding:
+  icon: 'users'
+  color: 'purple'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API Key'
+    required: true
+  github_token:
+    description: 'GitHub Token'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: latest
+
+    - name: Install dependencies
+      shell: bash
+      run: |
+        cd ${{ github.action_path }}
+        bun install --frozen-lockfile
+
+    - name: Run Multi-Agent Review
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
+      run: |
+        cd ${{ github.action_path }}
+        bun run src/index.ts
