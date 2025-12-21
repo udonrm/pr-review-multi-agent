@@ -42,13 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
     steps:
-      - uses: YOUR_USER/pr-review-multi-agent@main
+      - uses: udonrm/pr-review-multi-agent@master
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-`YOUR_USER` を自分のGitHubユーザー名に置き換えてください。
+
 
 ## 出力例
 
