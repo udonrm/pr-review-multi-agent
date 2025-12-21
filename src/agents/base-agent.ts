@@ -31,6 +31,65 @@ interface DiscussionResponse {
   finalReasoning: string;
 }
 
+const REVIEW_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    comments: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          line: { type: "number" },
+          label: {
+            type: "string",
+            enum: [
+              "praise",
+              "nitpick",
+              "suggestion",
+              "issue",
+              "todo",
+              "question",
+              "thought",
+              "chore",
+            ],
+          },
+          decorations: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["blocking", "non-blocking", "if-minor"],
+            },
+          },
+          subject: { type: "string" },
+          discussion: { type: "string" },
+        },
+        required: ["path", "line", "label", "subject"],
+      },
+    },
+    summary: { type: "string" },
+    vote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
+    reasoning: { type: "string" },
+  },
+  required: ["comments", "summary", "vote", "reasoning"] as string[],
+};
+
+const DISCUSSION_SCHEMA = {
+  type: "object" as const,
+  properties: {
+    agreements: { type: "array", items: { type: "string" } },
+    disagreements: { type: "array", items: { type: "string" } },
+    finalVote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
+    finalReasoning: { type: "string" },
+  },
+  required: [
+    "agreements",
+    "disagreements",
+    "finalVote",
+    "finalReasoning",
+  ] as string[],
+};
+
 export class ReviewAgent {
   constructor(private client: ClaudeClient, private type: AgentType) {}
 
@@ -45,7 +104,8 @@ export class ReviewAgent {
 
     const res = await this.client.chatJSON<ReviewResponse>(
       config.systemPrompt,
-      prompt
+      prompt,
+      REVIEW_SCHEMA
     );
 
     return {
@@ -90,7 +150,8 @@ export class ReviewAgent {
 
     const res = await this.client.chatJSON<DiscussionResponse>(
       config.systemPrompt,
-      prompt
+      prompt,
+      DISCUSSION_SCHEMA
     );
 
     return {
