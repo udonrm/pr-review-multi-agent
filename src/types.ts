@@ -63,7 +63,6 @@ export interface FinalReviewResult {
   finalVote: Vote;
   voteCount: { approve: number; requestChanges: number };
   consolidatedComments: ThreadedComment[];
-  summary: string;
 }
 
 export interface ThreadedComment {

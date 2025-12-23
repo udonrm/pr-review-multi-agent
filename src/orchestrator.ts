@@ -14,7 +14,6 @@ import type {
   ThreadedComment,
   AgentComment,
   Vote,
-  CommentLabel,
   CommentDecoration,
 } from "./types";
 
@@ -236,7 +235,6 @@ export class ReviewOrchestrator {
       finalVote,
       voteCount,
       consolidatedComments: this.buildThreadedComments(reviews),
-      summary: this.generateSummary(reviews, finalVote),
     };
   }
 
@@ -298,38 +296,6 @@ export class ReviewOrchestrator {
     });
   }
 
-  private generateSummary(reviews: InitialReview[], finalVote: Vote): string {
-    const total = reviews.reduce((sum, r) => sum + r.comments.length, 0);
-    const labels: Record<CommentLabel, number> = {
-      praise: 0,
-      nitpick: 0,
-      suggestion: 0,
-      issue: 0,
-      todo: 0,
-      question: 0,
-      thought: 0,
-      chore: 0,
-    };
-    let blocking = 0;
-
-    for (const r of reviews) {
-      for (const c of r.comments) {
-        labels[c.label]++;
-        if (c.decorations.includes("blocking")) blocking++;
-      }
-    }
-
-    const verdict = finalVote === "APPROVE" ? "承認" : "修正が必要";
-    const breakdown = Object.entries(labels)
-      .filter(([, v]) => v > 0)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join(", ");
-
-    return `5人の専門家による議論の結果、${verdict}と判断されました。\n\n合計${total}件の指摘。${
-      breakdown ? `\n内訳: ${breakdown}` : ""
-    }${blocking ? `\n\n**${blocking}件のblocking issue**があります。` : ""}`;
-  }
-
   private emptyResult(): FinalReviewResult {
     return {
       initialReviews: [],
@@ -337,7 +303,6 @@ export class ReviewOrchestrator {
       finalVote: "APPROVE",
       voteCount: { approve: 5, requestChanges: 0 },
       consolidatedComments: [],
-      summary: "レビュー対象のファイルがありませんでした。",
     };
   }
 }
