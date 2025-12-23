@@ -81,6 +81,12 @@ export interface AgentComment {
   vote: Vote;
 }
 
+export interface PastComment {
+  path: string;
+  line: number;
+  body: string;
+}
+
 export interface PRContext {
   owner: string;
   repo: string;
@@ -90,6 +96,7 @@ export interface PRContext {
   title: string;
   body: string;
   files: FileDiff[];
+  pastComments: PastComment[];
 }
 
 export interface AgentConfig {

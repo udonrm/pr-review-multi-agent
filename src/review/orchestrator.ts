@@ -1,11 +1,8 @@
-import { ClaudeClient } from "./claude/client";
-import { DiffParser } from "./github/diff-parser";
-import { CommentPoster } from "./github/comment-poster";
-import {
-  getAllAgentTypes,
-  getAgentConfig,
-  DISCUSSION_PROMPT,
-} from "./agents/prompts";
+import { ClaudeClient } from "../llm/claude";
+import { getPRContext, formatDiff } from "../gh/pr";
+import { postReviewComments } from "../gh/comments";
+import { ALL_AGENT_TYPES, getAgentConfig, DISCUSSION_PROMPT } from "./agents";
+import { REVIEW_SCHEMA, DISCUSSION_SCHEMA } from "./schemas";
 import type {
   PRContext,
   InitialReview,
@@ -14,28 +11,15 @@ import type {
   ThreadedComment,
   AgentComment,
   Vote,
-  CommentLabel,
-  CommentDecoration,
-} from "./types";
+  ExpertResponse,
+  ReviewComment,
+} from "../types";
 
 interface ReviewResponse {
-  comments: Array<{
-    path: string;
-    line: number;
-    label: CommentLabel;
-    decorations: CommentDecoration[];
-    subject: string;
-    discussion?: string;
-  }>;
+  comments: ReviewComment[];
   summary: string;
   vote: Vote;
   reasoning: string;
-}
-
-interface ExpertResponse {
-  expert: string;
-  stance: "agree" | "disagree";
-  reason: string;
 }
 
 interface DiscussionResponse {
@@ -44,79 +28,13 @@ interface DiscussionResponse {
   finalReasoning: string;
 }
 
-const REVIEW_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    comments: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          path: { type: "string" },
-          line: { type: "number" },
-          label: {
-            type: "string",
-            enum: [
-              "praise",
-              "nitpick",
-              "suggestion",
-              "issue",
-              "todo",
-              "question",
-              "thought",
-              "chore",
-            ],
-          },
-          decorations: {
-            type: "array",
-            items: {
-              type: "string",
-              enum: ["blocking", "non-blocking", "if-minor"],
-            },
-          },
-          subject: { type: "string" },
-          discussion: { type: "string" },
-        },
-        required: ["path", "line", "label", "subject"],
-      },
-    },
-    summary: { type: "string" },
-    vote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
-    reasoning: { type: "string" },
-  },
-  required: ["comments", "summary", "vote", "reasoning"] as string[],
-};
-
-const DISCUSSION_SCHEMA = {
-  type: "object" as const,
-  properties: {
-    responses: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          expert: { type: "string" },
-          stance: { type: "string", enum: ["agree", "disagree"] },
-          reason: { type: "string" },
-        },
-        required: ["expert", "stance", "reason"],
-      },
-    },
-    finalVote: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES"] },
-    finalReasoning: { type: "string" },
-  },
-  required: ["responses", "finalVote", "finalReasoning"] as string[],
-};
-
 export class ReviewOrchestrator {
   private claude: ClaudeClient;
-  private diff: DiffParser;
-  private poster: CommentPoster;
+  private githubToken: string;
 
   constructor(githubToken: string, anthropicApiKey: string) {
     this.claude = new ClaudeClient(anthropicApiKey);
-    this.diff = new DiffParser(githubToken);
-    this.poster = new CommentPoster(githubToken);
+    this.githubToken = githubToken;
   }
 
   async runReview(
@@ -124,16 +42,15 @@ export class ReviewOrchestrator {
     repo: string,
     pullNumber: number
   ): Promise<FinalReviewResult> {
-    const context = await this.diff.getPRContext(owner, repo, pullNumber);
+    const context = await getPRContext(owner, repo, pullNumber);
     if (context.files.length === 0) return this.emptyResult();
 
-    const diffContent = this.diff.formatDiffForReview(context.files);
+    const diffContent = formatDiff(context.files);
     const initialReviews = await this.runInitialReviews(context, diffContent);
-
     const discussions = await this.runDiscussionRound(initialReviews);
     const result = this.consolidateResults(initialReviews, discussions);
 
-    await this.poster.postReview(context, result);
+    await postReviewComments(this.githubToken, context, result);
     return result;
   }
 
@@ -141,13 +58,22 @@ export class ReviewOrchestrator {
     context: PRContext,
     diffContent: string
   ): Promise<InitialReview[]> {
+    const pastCommentsText =
+      context.pastComments.length > 0
+        ? `\n\n## Past Review Comments\n\n${context.pastComments
+            .map((c) => `[${c.path}:${c.line}] ${c.body}`)
+            .join(
+              "\n\n"
+            )}\n\nNote: Consider past comments and avoid repeating the same issues if already addressed. Feel free to build upon, agree, or disagree with previous points to continue the discussion.`
+        : "";
+
     const prompt = `## Pull Request: ${context.title}\n\n${
       context.body || "(No description)"
-    }\n\n## Diff\n\n${diffContent}`;
+    }\n\n## Diff\n\n${diffContent}${pastCommentsText}`;
 
     const reviews: InitialReview[] = [];
 
-    for (const type of getAllAgentTypes()) {
+    for (const type of ALL_AGENT_TYPES) {
       const config = getAgentConfig(type);
       const res = await this.claude.chatJSON<ReviewResponse>(
         config.systemPrompt,
@@ -165,7 +91,7 @@ export class ReviewOrchestrator {
         summary: res.summary || "",
         initialVote: res.vote || "APPROVE",
         reasoning: res.reasoning || "",
-      } as InitialReview);
+      });
     }
 
     return reviews;
@@ -176,7 +102,6 @@ export class ReviewOrchestrator {
   ): Promise<DiscussionResult[]> {
     const discussions: DiscussionResult[] = [];
 
-    // 直列実行でレートリミットを回避
     for (const review of reviews) {
       const others = reviews.filter((r) => r.agent !== review.agent);
       const prompt = this.buildDiscussionPrompt(others);
@@ -192,7 +117,7 @@ export class ReviewOrchestrator {
         responses: Array.isArray(res.responses) ? res.responses : [],
         finalVote: res.finalVote || "APPROVE",
         finalReasoning: res.finalReasoning || "",
-      } as DiscussionResult);
+      });
     }
 
     return discussions;

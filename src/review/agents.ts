@@ -23,7 +23,7 @@ Follow https://conventionalcomments.org/
 - Otherwise → APPROVE
 `;
 
-export const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
+const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
   "security-expert": {
     type: "security-expert",
     name: "Security Expert",
@@ -113,13 +113,13 @@ You MUST comment on every expert's review - do not skip any.
 Note: You must include a response for each expert listed above.
 `;
 
-export const getAgentConfig = (type: AgentType): AgentConfig =>
-  AGENT_CONFIGS[type];
-
-export const getAllAgentTypes = (): AgentType[] => [
+export const ALL_AGENT_TYPES: AgentType[] = [
   "security-expert",
   "performance-expert",
   "readability-expert",
   "architecture-expert",
   "testing-expert",
 ];
+
+export const getAgentConfig = (type: AgentType): AgentConfig =>
+  AGENT_CONFIGS[type];

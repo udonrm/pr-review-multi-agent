@@ -32,4 +32,4 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
       run: |
         cd ${{ github.action_path }}
-        bun run src/index.ts
+        bun run src/main.ts

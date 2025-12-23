@@ -1,4 +1,4 @@
-import { ReviewOrchestrator } from "./orchestrator";
+import { ReviewOrchestrator } from "./review/orchestrator";
 
 const githubToken = process.env.GITHUB_TOKEN!;
 const anthropicApiKey = process.env.ANTHROPIC_API_KEY!;
