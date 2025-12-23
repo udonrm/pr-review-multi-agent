@@ -14,6 +14,7 @@ import type {
   ThreadedComment,
   AgentComment,
   Vote,
+  CommentLabel,
   CommentDecoration,
 } from "./types";
 
