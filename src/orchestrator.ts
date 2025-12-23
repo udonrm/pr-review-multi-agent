@@ -130,10 +130,6 @@ export class ReviewOrchestrator {
     const diffContent = this.diff.formatDiffForReview(context.files);
     const initialReviews = await this.runInitialReviews(context, diffContent);
 
-    if (initialReviews.every((r) => r.initialVote === "APPROVE")) {
-      return this.resultFromInitialReviews(initialReviews);
-    }
-
     const discussions = await this.runDiscussionRound(initialReviews);
     const result = this.consolidateResults(initialReviews, discussions);
 
@@ -289,9 +285,6 @@ export class ReviewOrchestrator {
 
     return Array.from(map.values()).map((item) => {
       const comments = Array.from(item.agentComments.values());
-      const hasBlocking = comments.some((c) =>
-        c.decorations.includes("blocking")
-      );
       const requestChangesCount = comments.filter(
         (c) => c.vote === "REQUEST_CHANGES"
       ).length;
@@ -300,10 +293,7 @@ export class ReviewOrchestrator {
         path: item.path,
         line: item.line,
         thread: comments,
-        finalVerdict:
-          hasBlocking || requestChangesCount >= 2
-            ? "REQUEST_CHANGES"
-            : "APPROVE",
+        finalVerdict: requestChangesCount >= 2 ? "REQUEST_CHANGES" : "APPROVE",
       };
     });
   }
@@ -348,19 +338,6 @@ export class ReviewOrchestrator {
       voteCount: { approve: 5, requestChanges: 0 },
       consolidatedComments: [],
       summary: "レビュー対象のファイルがありませんでした。",
-    };
-  }
-
-  private resultFromInitialReviews(
-    reviews: InitialReview[]
-  ): FinalReviewResult {
-    return {
-      initialReviews: reviews,
-      discussions: [],
-      finalVote: "APPROVE",
-      voteCount: { approve: 5, requestChanges: 0 },
-      consolidatedComments: this.buildThreadedComments(reviews),
-      summary: "全専門家が承認しました。",
     };
   }
 }
