@@ -79,6 +79,7 @@ export interface AgentComment {
   subject: string;
   discussion?: string;
   vote: Vote;
+  responses?: ExpertResponse[];
 }
 
 export interface PastComment {

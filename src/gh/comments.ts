@@ -46,6 +46,15 @@ function formatComment(comment: AgentComment, prefix = ""): string {
   let body = `### ${getAgentLabel(comment.agent)}${prefix}\n\n`;
   body += `**${label}**${dec}: ${comment.subject}\n`;
   if (comment.discussion) body += `\n${comment.discussion}\n`;
+
+  if (comment.responses && comment.responses.length > 0) {
+    body += `\n#### 他エキスパートへの見解\n`;
+    for (const r of comment.responses) {
+      const stanceEmoji = r.stance === "agree" ? "👍" : "👎";
+      body += `- **${r.expert}**: ${stanceEmoji} ${r.reason}\n`;
+    }
+  }
+
   body += `\n**Vote**: ${voteEmoji(comment.vote)} ${comment.vote}`;
   return body;
 }
@@ -70,11 +79,31 @@ function formatVoteTable(
   return body;
 }
 
-function createReviewComment(
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(
+  fn: () => T,
+  retries = 3,
+  delayMs = 1000
+): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return fn();
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await sleep(delayMs * (i + 1));
+    }
+  }
+  throw new Error("Unreachable");
+}
+
+async function createReviewComment(
   context: PRContext,
   thread: ThreadedComment,
   body: string
-): number {
+): Promise<number> {
   const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments`;
   const payload = JSON.stringify({
     commit_id: context.headSha,
@@ -82,20 +111,24 @@ function createReviewComment(
     line: thread.line,
     body,
   });
-  const result = execSync(`gh api -X POST ${endpoint} --input -`, {
-    input: payload,
-  }).toString();
+  const result = await withRetry(() =>
+    execSync(`gh api -X POST ${endpoint} --input -`, {
+      input: payload,
+    }).toString()
+  );
   return JSON.parse(result).id;
 }
 
-function createReplyComment(
+async function createReplyComment(
   context: PRContext,
   commentId: number,
   body: string
-): void {
+): Promise<void> {
   const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments/${commentId}/replies`;
   const payload = JSON.stringify({ body });
-  execSync(`gh api -X POST ${endpoint} --input -`, { input: payload });
+  await withRetry(() =>
+    execSync(`gh api -X POST ${endpoint} --input -`, { input: payload })
+  );
 }
 
 export async function postReviewComments(
@@ -115,7 +148,7 @@ async function postThread(
   if (thread.thread.length === 0) return;
 
   const first = thread.thread[0];
-  const firstCommentId = createReviewComment(
+  const firstCommentId = await createReviewComment(
     context,
     thread,
     formatComment(first)
@@ -124,10 +157,14 @@ async function postThread(
   for (let i = 1; i < thread.thread.length; i++) {
     const comment = thread.thread[i];
     const stance = comment.vote === first.vote ? ": 👍 賛成" : ": 👎 反対";
-    createReplyComment(context, firstCommentId, formatComment(comment, stance));
+    await createReplyComment(
+      context,
+      firstCommentId,
+      formatComment(comment, stance)
+    );
   }
 
-  createReplyComment(
+  await createReplyComment(
     context,
     firstCommentId,
     formatVoteTable(thread.thread, thread.finalVerdict)

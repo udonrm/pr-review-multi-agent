@@ -10,6 +10,7 @@ import type {
   FinalReviewResult,
   ThreadedComment,
   AgentComment,
+  AgentType,
   Vote,
   ExpertResponse,
   ReviewComment,
@@ -160,17 +161,27 @@ export class ReviewOrchestrator {
       discussions,
       finalVote,
       voteCount,
-      consolidatedComments: this.buildThreadedComments(reviews),
+      consolidatedComments: this.buildThreadedComments(reviews, discussions),
     };
   }
 
-  private buildThreadedComments(reviews: InitialReview[]): ThreadedComment[] {
+  private buildThreadedComments(
+    reviews: InitialReview[],
+    discussions: DiscussionResult[]
+  ): ThreadedComment[] {
+    const discussionMap = new Map<AgentType, DiscussionResult>();
+    for (const d of discussions) {
+      discussionMap.set(d.agent, d);
+    }
+
     const map = new Map<
       string,
       { path: string; line: number; agentComments: Map<string, AgentComment> }
     >();
 
     for (const review of reviews) {
+      const discussion = discussionMap.get(review.agent);
+
       for (const c of review.comments) {
         const key = `${c.path}:${c.line}`;
         const entry = map.get(key) || {
@@ -200,7 +211,8 @@ export class ReviewOrchestrator {
             decorations: [...c.decorations],
             subject: c.subject,
             discussion: c.discussion,
-            vote: review.initialVote,
+            vote: discussion?.finalVote || review.initialVote,
+            responses: discussion?.responses,
           });
         }
         map.set(key, entry);
