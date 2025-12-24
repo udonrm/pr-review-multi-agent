@@ -43,7 +43,7 @@ export async function getPRContext(
     .filter((f) => !IGNORE_PATTERNS.some((p) => p.test(f.filename)))
     .map((f) => ({
       filename: f.filename,
-      status: mapStatus(f.status),
+      status: f.status as FileDiff["status"],
       additions: f.additions,
       deletions: f.deletions,
       patch: f.patch || "",
@@ -60,15 +60,6 @@ export async function getPRContext(
     files: fileDiffs,
     pastComments: getPastComments(owner, repo, pullNumber),
   };
-}
-
-function mapStatus(
-  status: string
-): "added" | "modified" | "deleted" | "renamed" {
-  if (status === "added") return "added";
-  if (status === "removed") return "deleted";
-  if (status === "renamed") return "renamed";
-  return "modified";
 }
 
 function getPastComments(

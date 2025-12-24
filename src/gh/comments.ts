@@ -70,12 +70,6 @@ function formatVoteTable(
   return body;
 }
 
-function ghApi(method: string, endpoint: string, body?: object): string {
-  const bodyArg = body ? `-f body=${JSON.stringify(JSON.stringify(body))}` : "";
-  const cmd = `gh api -X ${method} ${endpoint} ${bodyArg}`;
-  return execSync(cmd).toString();
-}
-
 function createReviewComment(
   context: PRContext,
   thread: ThreadedComment,

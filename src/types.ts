@@ -21,7 +21,7 @@ export type CommentDecoration = "blocking" | "non-blocking" | "if-minor";
 
 export interface FileDiff {
   filename: string;
-  status: "added" | "modified" | "deleted" | "renamed";
+  status: "added" | "modified" | "removed" | "renamed";
   additions: number;
   deletions: number;
   patch: string;
