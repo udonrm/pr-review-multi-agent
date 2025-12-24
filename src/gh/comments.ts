@@ -1,4 +1,4 @@
-import { Octokit } from "@octokit/rest";
+import { execSync } from "child_process";
 import { getAgentConfig } from "../review/agents";
 import type {
   PRContext,
@@ -55,7 +55,9 @@ function formatVoteTable(
   finalVerdict: Vote
 ): string {
   const approveCount = comments.filter((c) => c.vote === "APPROVE").length;
-  const requestChangesCount = comments.length - approveCount;
+  const requestChangesCount = comments.filter(
+    (c) => c.vote === "REQUEST_CHANGES"
+  ).length;
   const verdict =
     finalVerdict === "APPROVE" ? "✅ Approved" : "🔴 Changes Requested";
 
@@ -68,53 +70,73 @@ function formatVoteTable(
   return body;
 }
 
+function ghApi(method: string, endpoint: string, body?: object): string {
+  const bodyArg = body ? `-f body=${JSON.stringify(JSON.stringify(body))}` : "";
+  const cmd = `gh api -X ${method} ${endpoint} ${bodyArg}`;
+  return execSync(cmd).toString();
+}
+
+function createReviewComment(
+  context: PRContext,
+  thread: ThreadedComment,
+  body: string
+): number {
+  const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments`;
+  const payload = {
+    commit_id: context.headSha,
+    path: thread.path,
+    line: thread.line,
+    body,
+  };
+  const result = execSync(
+    `gh api -X POST ${endpoint} -f commit_id="${payload.commit_id}" -f path="${
+      payload.path
+    }" -F line=${payload.line} -f body=${JSON.stringify(payload.body)}`
+  ).toString();
+  return JSON.parse(result).id;
+}
+
+function createReplyComment(
+  context: PRContext,
+  commentId: number,
+  body: string
+): void {
+  const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments/${commentId}/replies`;
+  execSync(`gh api -X POST ${endpoint} -f body=${JSON.stringify(body)}`);
+}
+
 export async function postReviewComments(
   token: string,
   context: PRContext,
   result: FinalReviewResult
 ): Promise<void> {
-  const octokit = new Octokit({ auth: token });
-
   for (const thread of result.consolidatedComments) {
-    await postThread(octokit, context, thread);
+    await postThread(context, thread);
   }
 }
 
 async function postThread(
-  octokit: Octokit,
   context: PRContext,
   thread: ThreadedComment
 ): Promise<void> {
   if (thread.thread.length === 0) return;
 
   const first = thread.thread[0];
-  const { data: firstComment } = await octokit.pulls.createReviewComment({
-    owner: context.owner,
-    repo: context.repo,
-    pull_number: context.pullNumber,
-    commit_id: context.headSha,
-    path: thread.path,
-    line: thread.line,
-    body: formatComment(first),
-  });
+  const firstCommentId = createReviewComment(
+    context,
+    thread,
+    formatComment(first)
+  );
 
   for (let i = 1; i < thread.thread.length; i++) {
     const comment = thread.thread[i];
     const stance = comment.vote === first.vote ? ": 👍 賛成" : ": 👎 反対";
-    await octokit.pulls.createReplyForReviewComment({
-      owner: context.owner,
-      repo: context.repo,
-      pull_number: context.pullNumber,
-      comment_id: firstComment.id,
-      body: formatComment(comment, stance),
-    });
+    createReplyComment(context, firstCommentId, formatComment(comment, stance));
   }
 
-  await octokit.pulls.createReplyForReviewComment({
-    owner: context.owner,
-    repo: context.repo,
-    pull_number: context.pullNumber,
-    comment_id: firstComment.id,
-    body: formatVoteTable(thread.thread, thread.finalVerdict),
-  });
+  createReplyComment(
+    context,
+    firstCommentId,
+    formatVoteTable(thread.thread, thread.finalVerdict)
+  );
 }

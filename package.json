@@ -2,14 +2,13 @@
   "name": "pr-review-multi-agent",
   "version": "1.0.0",
   "description": "Multi-agent PR review system with Claude API",
-  "main": "src/index.ts",
+  "main": "src/main.ts",
   "scripts": {
-    "review": "bun run src/index.ts",
+    "review": "bun run src/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.71.2",
-    "@octokit/rest": "^22.0.1"
+    "@anthropic-ai/sdk": "^0.71.2"
   },
   "devDependencies": {
     "@types/bun": "latest",
