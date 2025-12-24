@@ -76,17 +76,15 @@ function createReviewComment(
   body: string
 ): number {
   const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments`;
-  const payload = {
+  const payload = JSON.stringify({
     commit_id: context.headSha,
     path: thread.path,
     line: thread.line,
     body,
-  };
-  const result = execSync(
-    `gh api -X POST ${endpoint} -f commit_id="${payload.commit_id}" -f path="${
-      payload.path
-    }" -F line=${payload.line} -f body=${JSON.stringify(payload.body)}`
-  ).toString();
+  });
+  const result = execSync(`gh api -X POST ${endpoint} --input -`, {
+    input: payload,
+  }).toString();
   return JSON.parse(result).id;
 }
 
@@ -96,7 +94,8 @@ function createReplyComment(
   body: string
 ): void {
   const endpoint = `repos/${context.owner}/${context.repo}/pulls/${context.pullNumber}/comments/${commentId}/replies`;
-  execSync(`gh api -X POST ${endpoint} -f body=${JSON.stringify(body)}`);
+  const payload = JSON.stringify({ body });
+  execSync(`gh api -X POST ${endpoint} --input -`, { input: payload });
 }
 
 export async function postReviewComments(
